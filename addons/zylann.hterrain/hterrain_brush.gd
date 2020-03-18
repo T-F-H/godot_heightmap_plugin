@@ -329,7 +329,50 @@ class OperatorSum:
 	func exec(data, pos_x, pos_y, v):
 		sum += _im.get_pixel(pos_x, pos_y).r * v
 
+func get_plain(im : Image, pos_x : int , pos_y : int, brush_width : int) -> Image: # pos_x/y are 0 at bottom left
+	var plain : Image # a map of the  brush area with two overlapping gradiets denoting the slope
+	im.lock()
+	plain = Image.new()
+	plain.create(brush_width,brush_width,im.has_mipmaps(), im.get_format())
+	var x_min_val = im.get_pixel(pos_x, pos_y + brush_width/2).r # left
+	var x_max_val = im.get_pixel(pos_x + brush_width, pos_y + brush_width/2).r # right
+	var y_min_val = im.get_pixel(pos_x + brush_width/2, pos_y).r # top
+	var y_max_val = im.get_pixel(pos_x + brush_width/2, pos_y + brush_width).r # botom
+	
+	plain.lock()
+	for y in plain.get_height():
+		#print(y, " divided by ", brush_width, " is ", float(y)/float(brush_width))
+		var y_grad = lerp(y_min_val, y_max_val, float(y)/float(plain.get_height()))
+		#print(y," from ",y_min_val," to ",y_max_val, ", with ",float(y)/float(plain.get_height())," is ",y_grad)
+		for x in plain.get_width():
+			var x_grad = lerp(x_min_val, x_max_val, float(x)/float(plain.get_width()))
+			var this_red = (x_grad + y_grad)/2
+			plain.set_pixel(x, y, Color(this_red, 0, 0, 1))
+	plain.unlock()
+	im.unlock()
+	return plain
 
+class OperatorLerpMap: # Transitions between the values of the target map and the actual image (not actually linear)
+
+	var target_map : Image
+	var _im = null
+	# How what the position of target_map in the im is
+	var off_x
+	var off_y
+	func _init(map : Image, im, offset_x, offset_y):
+		target_map = map
+		_im = im
+		off_x = offset_x
+		off_y = offset_y
+	
+	func exec(data, pos_x, pos_y, v):
+		var c = _im.get_pixel(pos_x, pos_y)
+		var target =  target_map.get_pixel(pos_x - off_x, pos_y - off_y)
+		var distance = abs(target.r - c.r) # Change is proportional to distance
+		distance = sqrt(distance)
+		c = lerp(c, target, v*distance)
+		_im.set_pixel(pos_x, pos_y, c)
+	
 class OperatorLerp:
 
 	var target = 0.0
@@ -425,24 +468,43 @@ func _paint_height(data, origin_x, origin_y, speed):
 
 
 func _smooth_height(data, origin_x, origin_y, speed):
+	_true_smooth_height(data, origin_x, origin_y, speed)
+#	var im : Image = data.get_image(HTerrainData.CHANNEL_HEIGHT)
+#	print(im.get_format())
+#	assert(im != null)
+#
+#	_backup_for_undo(im, _undo_cache, origin_x, origin_y, _shape_size, _shape_size)
+#
+#	im.lock()
+#
+#	# GET AVERAGE PIXEL VALUE WITHIN BRUSH  (in sum_op.sum)
+#	var sum_op = OperatorSum.new(im)
+#	# Perform sum at full opacity, we'll use it for the next operation
+#	_foreach_xy(sum_op, data, origin_x, origin_y, 1.0, 1.0, _shape)
+#
+#	# The desired value for every pixel is the mean of the values within the brush
+#	var target_value = sum_op.sum / float(_shape_sum)
+#
+#	var lerp_op = OperatorLerp.new(target_value, im)
+#	_foreach_xy(lerp_op, data, origin_x, origin_y, speed, _opacity, _shape)
+#
+#	im.unlock()
 
+
+func _true_smooth_height(data, origin_x, origin_y, speed):
 	var im = data.get_image(HTerrainData.CHANNEL_HEIGHT)
 	assert(im != null)
 
 	_backup_for_undo(im, _undo_cache, origin_x, origin_y, _shape_size, _shape_size)
-
+	var plain : Image = get_plain(im, origin_x, origin_y, _shape_size)
 	im.lock()
-
-	var sum_op = OperatorSum.new(im)
-	# Perform sum at full opacity, we'll use it for the next operation
-	_foreach_xy(sum_op, data, origin_x, origin_y, 1.0, 1.0, _shape)
-	var target_value = sum_op.sum / float(_shape_sum)
-
 	var lerp_op = OperatorLerp.new(target_value, im)
 	_foreach_xy(lerp_op, data, origin_x, origin_y, speed, _opacity, _shape)
-
+	plain.lock()
+	var lerp_op_map = OperatorLerpMap.new(plain, im, origin_x, origin_y)
+	_foreach_xy(lerp_op_map, data, origin_x, origin_y, speed, _opacity, _shape)
+	plain.unlock()
 	im.unlock()
-
 
 func _flatten(data, origin_x, origin_y):
 
@@ -477,7 +539,7 @@ func _paint_splat(data, origin_x, origin_y):
 	min_y = Util.clamp_int(min_y, 0, data.get_resolution())
 	max_x = Util.clamp_int(max_x, 0, data.get_resolution())
 	max_y = Util.clamp_int(max_y, 0, data.get_resolution())
-
+	
 	im.lock()
 
 	if _texture_mode == HTerrain.SHADER_SIMPLE4:
