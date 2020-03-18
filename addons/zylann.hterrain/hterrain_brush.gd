@@ -498,8 +498,6 @@ func _true_smooth_height(data, origin_x, origin_y, speed):
 	_backup_for_undo(im, _undo_cache, origin_x, origin_y, _shape_size, _shape_size)
 	var plain : Image = get_plain(im, origin_x, origin_y, _shape_size)
 	im.lock()
-	var lerp_op = OperatorLerp.new(target_value, im)
-	_foreach_xy(lerp_op, data, origin_x, origin_y, speed, _opacity, _shape)
 	plain.lock()
 	var lerp_op_map = OperatorLerpMap.new(plain, im, origin_x, origin_y)
 	_foreach_xy(lerp_op_map, data, origin_x, origin_y, speed, _opacity, _shape)
